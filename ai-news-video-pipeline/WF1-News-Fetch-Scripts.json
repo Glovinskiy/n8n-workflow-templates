@@ -1,0 +1,434 @@
+{
+  "name": "WF1 — News Fetch & Scripts",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "30 7 * * *"
+            }
+          ]
+        }
+      },
+      "id": "342574c3-6741-4406-91c6-93771a233d61",
+      "name": "Daily 7:30 Kyiv",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [\n  'https://www.pravda.com.ua/rss/',\n  'https://www.epravda.com.ua/rss/',\n  'https://www.eurointegration.com.ua/rss/',\n  'https://www.rbc.ua/static/rss/all.ukr.rss.xml',\n  'https://nv.ua/ukr/rss/all.xml',\n  'https://rss.unian.net/site/news_ukr.rss',\n  'https://www.ukrinform.ua/rss/block-lastnews',\n  'https://zn.ua/ukr/rss/full.rss',\n  'https://censor.net/includes/news_uk.xml',\n  'https://www.radiosvoboda.org/api/zrqiteuuir',\n  'https://feeds.bbci.co.uk/ukrainian/rss.xml',\n  'https://feeds.bbci.co.uk/news/world/rss.xml',\n  'http://rss.cnn.com/rss/edition_world.rss'\n].map(url => ({ json: { url } }));"
+      },
+      "id": "b4257033-70c2-4e8e-af9a-40b262a63da7",
+      "name": "Define RSS Sources",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+            },
+            {
+              "name": "Accept",
+              "value": "application/rss+xml, application/xml, text/xml, */*"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "db5599cf-c0ca-46c5-be30-59caa459c2c0",
+      "name": "Fetch RSS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        448,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.data }}",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              },
+              "rightValue": "<item"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c83d3812-6cc0-4fcb-8df9-b8391dbb6269",
+      "name": "Keep Only Valid RSS",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        672,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "options": {
+          "explicitArray": false,
+          "mergeAttrs": true,
+          "trim": true
+        }
+      },
+      "id": "512962f9-4148-4a8f-8a58-1558021632bd",
+      "name": "Parse XML",
+      "type": "n8n-nodes-base.xml",
+      "typeVersion": 1,
+      "position": [
+        896,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const out = [];\nconst txt = (v) => {\n  if (v == null) return '';\n  if (typeof v === 'object') return v._ || v['#text'] || '';\n  return String(v);\n};\nfor (const it of $input.all()) {\n  const j = it.json || {};\n  const channel = (j.rss && j.rss.channel) ? j.rss.channel : j.channel;\n  if (!channel) continue;\n  let items = channel.item;\n  if (!items) continue;\n  if (!Array.isArray(items)) items = [items];\n  for (const a of items) {\n    let link = a.link;\n    if (typeof link === 'object') link = link.href || link._ || '';\n    const title = txt(a.title);\n    if (!link || !title) continue;\n    out.push({ json: {\n      title,\n      link: String(link).trim(),\n      pubDate: txt(a.pubDate) || txt(a['dc:date']) || '',\n      contentSnippet: txt(a.description).replace(/<[^>]*>/g, '').substring(0, 300)\n    }});\n  }\n}\nreturn out;"
+      },
+      "id": "71c00649-3a2f-4e0b-ac1a-06040b048104",
+      "name": "Extract Articles",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "compare": "selectedFields",
+        "fieldsToCompare": "link",
+        "options": {}
+      },
+      "id": "399d255f-930d-470a-a96e-12342df0e8f6",
+      "name": "Remove Duplicate Articles",
+      "type": "n8n-nodes-base.removeDuplicates",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const cutoff = Date.now() - 86400000;\nconst articles = $input.all()\n  .filter(item => {\n    const d = item.json.isoDate || item.json.pubDate;\n    if (!d) return false;\n    const t = new Date(d).getTime();\n    return !isNaN(t) && t > cutoff;\n  })\n  .map(item => item.json);\n\nif (articles.length === 0) {\n  throw new Error('No articles found in last 24h');\n}\n\nconst list = articles.slice(0, 100).map((a, i) =>\n  (i + 1) + '. ' + (a.title || 'No title') + '\\n' +\n  'URL: ' + (a.link || '') + '\\n' +\n  'Опис: ' + ((a.contentSnippet || a.description || '').substring(0, 250))\n).join('\\n\\n');\n\nconst prompt = 'Ти — редактор новин. Завдання:\\n' +\n  '1. Відібрати ТОП-10 найважливіших новин зі списку\\n' +\n  '2. Написати 5 скриптів для YouTube Shorts (30-60 сек, 80-120 слів, 1 short = 1 новина)\\n' +\n  '3. Написати 1 скрипт для YouTube відео 16:9 (2-3 хв, 300-400 слів, всі 10 новин)\\n' +\n  'Мова — виключно українська. Журналістський стиль, без кліше.\\n\\n' +\n  'Відповідай ТІЛЬКИ JSON:\\n' +\n  '{\"top10\":[{\"title\":\"\",\"url\":\"\"}],' +\n  '\"shorts\":[' +\n  '{\"number\":1,\"title\":\"\",\"script\":\"\",\"source_urls\":[\"\"]},' +\n  '{\"number\":2,\"title\":\"\",\"script\":\"\",\"source_urls\":[\"\"]},' +\n  '{\"number\":3,\"title\":\"\",\"script\":\"\",\"source_urls\":[\"\"]},' +\n  '{\"number\":4,\"title\":\"\",\"script\":\"\",\"source_urls\":[\"\"]},' +\n  '{\"number\":5,\"title\":\"\",\"script\":\"\",\"source_urls\":[\"\"]}],' +\n  '\"long\":{\"title\":\"\",\"script\":\"\",\"source_urls\":[\"\"]}}\\n\\n' +\n  'Список новин (' + articles.length + ' статей):\\n\\n' + list;\n\nreturn [{ json: { prompt, articleCount: articles.length } }];"
+      },
+      "id": "7dfb6e2b-af43-4c87-a9ec-d4164cbe3101",
+      "name": "Filter 24h + Build Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "gpt-4o"
+        },
+        "responses": {
+          "values": [
+            {
+              "content": "={{ $json.prompt }}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {
+          "maxTokens": 4096,
+          "textFormat": {
+            "textOptions": {
+              "type": "json_object"
+            }
+          }
+        }
+      },
+      "id": "9e9b9b3c-3e28-4ed5-9ea2-f0c605434fe2",
+      "name": "OpenAI — Generate Scripts",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.3,
+      "position": [
+        1792,
+        0
+      ],
+      "credentials": {
+        "openAiApi": {
+          "name": "OpenAi_main"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $input.first().json;\n\nfunction deepFindJson(root) {\n  let found = null;\n  const walk = (v) => {\n    if (found) return;\n    if (v && typeof v === 'object' && !Array.isArray(v) && (v.shorts || v.long)) {\n      found = v; return;\n    }\n    if (typeof v === 'string') {\n      const t = v.replace(/^```json\\s*/i, '').replace(/```$/i, '').trim();\n      if (t.startsWith('{') && (t.includes('\"shorts\"') || t.includes('\"long\"'))) {\n        try { found = JSON.parse(t); } catch (e) {}\n      }\n    } else if (Array.isArray(v)) {\n      v.forEach(walk);\n    } else if (v && typeof v === 'object') {\n      Object.values(v).forEach(walk);\n    }\n  };\n  walk(root);\n  return found;\n}\n\nconst parsed = deepFindJson(j);\n\nif (!parsed) {\n  throw new Error('Не знайшов JSON зі скриптами. item: ' + JSON.stringify(j).substring(0, 500));\n}\n\nconst today = new Date().toISOString().split('T')[0];\nconst items = [];\n\nfor (const s of (parsed.shorts || [])) {\n  items.push({ json: {\n    title: s.title || ('Short ' + s.number),\n    script: s.script || '',\n    format: 'Short',\n    short_number: s.number,\n    source_urls: (s.source_urls || []).join(', '),\n    news_date: today\n  }});\n}\n\nconst long = parsed.long || {};\nitems.push({ json: {\n  title: long.title || 'Дайджест новин',\n  script: long.script || '',\n  format: '16:9',\n  short_number: null,\n  source_urls: (long.source_urls || []).join(', '),\n  news_date: today\n}});\n\nreturn items;\n"
+      },
+      "id": "4a8a7605-6fa3-401c-9479-a710c969930c",
+      "name": "Parse Scripts from OpenAI",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2080,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "databaseId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "<__PLACEHOLDER_VALUE__Notion Database ID — панель скриптів__>"
+        },
+        "title": "={{ $json.title }}",
+        "propertiesUi": {
+          "propertyValues": [
+            {
+              "key": "Script|rich_text",
+              "type": "rich_text",
+              "textContent": "={{ $json.script }}"
+            },
+            {
+              "key": "Format|select",
+              "type": "select",
+              "selectValue": "={{ $json.format }}"
+            },
+            {
+              "key": "Status|select",
+              "type": "select",
+              "selectValue": "Draft"
+            },
+            {
+              "key": "Short_Number|number",
+              "type": "number",
+              "numberValue": "={{ $json.short_number }}"
+            },
+            {
+              "key": "News_Date|date",
+              "type": "date",
+              "date": "={{ $json.news_date }}"
+            },
+            {
+              "key": "Source_Links|rich_text",
+              "type": "rich_text",
+              "textContent": "={{ $json.source_urls }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "48f0a1cd-5c88-489d-b984-54a0726bd2f0",
+      "name": "Create Script in Notion",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2.2,
+      "position": [
+        2240,
+        0
+      ],
+      "credentials": {
+        "notionApi": {
+          "name": "Notion account"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "chatId": "459910467",
+        "text": "={{ \"Нові скрипти готові до редагування!\\n\\nДата: \" + $now.toFormat(\"dd.MM.yyyy\") + \"\\nКількість: 5 Shorts + 1 відео 16:9\\n\\nПерейди в Notion, відредагуй і постав Status = Approved\" }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "6e209043-5964-49b1-a746-b9d3d1b8c47f",
+      "name": "Notify Editor — Scripts Ready",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2464,
+        0
+      ],
+      "executeOnce": true,
+      "webhookId": "ca39da2b-6ae5-42f5-8fb7-e6839ee187f1",
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram Burum_bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily 7:30 Kyiv": {
+      "main": [
+        [
+          {
+            "node": "Define RSS Sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Define RSS Sources": {
+      "main": [
+        [
+          {
+            "node": "Fetch RSS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch RSS": {
+      "main": [
+        [
+          {
+            "node": "Keep Only Valid RSS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keep Only Valid RSS": {
+      "main": [
+        [
+          {
+            "node": "Parse XML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse XML": {
+      "main": [
+        [
+          {
+            "node": "Extract Articles",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Articles": {
+      "main": [
+        [
+          {
+            "node": "Remove Duplicate Articles",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remove Duplicate Articles": {
+      "main": [
+        [
+          {
+            "node": "Filter 24h + Build Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter 24h + Build Prompt": {
+      "main": [
+        [
+          {
+            "node": "OpenAI — Generate Scripts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI — Generate Scripts": {
+      "main": [
+        [
+          {
+            "node": "Parse Scripts from OpenAI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Scripts from OpenAI": {
+      "main": [
+        [
+          {
+            "node": "Create Script in Notion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Script in Notion": {
+      "main": [
+        [
+          {
+            "node": "Notify Editor — Scripts Ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true
+  },
+  "versionId": "a805e4ef-75a8-4d2e-98c9-fb4b5b340b7d",
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp"
+  },
+  "id": "NDU045takNNo0WPa",
+  "tags": []
+}
