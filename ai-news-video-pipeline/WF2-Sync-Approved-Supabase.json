@@ -28,9 +28,9 @@
         "databaseId": {
           "__rl": true,
           "mode": "list",
-          "value": "0e0978e0-30b4-48bd-ae0f-e8743e9d2b1b",
-          "cachedResultName": "[DELETE] News Pipeline — Scripts (TEST)",
-          "cachedResultUrl": "https://app.notion.com/p/0e0978e030b448bdae0fe8743e9d2b1b"
+          "value": "YOUR_NOTION_DATABASE_ID",
+          "cachedResultName": "Your Notion Scripts Database",
+          "cachedResultUrl": "https://notion.so/YOUR_DATABASE_URL"
         },
         "returnAll": true,
         "options": {}
