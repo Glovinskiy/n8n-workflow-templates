@@ -1,0 +1,435 @@
+{
+  "name": "JH · Scraping (HTML)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 3
+            }
+          ]
+        }
+      },
+      "id": "7982edd0-3867-4862-97ff-1646896c0c83",
+      "name": "Every 3 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://djinni.co/jobs/?all_keywords=n8n",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "3d93e068-d20a-4bb2-b11c-2581cdf87f17",
+      "name": "Djinni Fetch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        224,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const html = String($input.first().json.data || '');\nconst out = [];\nconst seen = new Set();\nconst re = /<script type=\"application\\/ld\\+json\">([\\s\\S]*?)<\\/script>/g;\nlet m;\nwhile ((m = re.exec(html)) !== null) {\n  let arr;\n  try { arr = JSON.parse(m[1]); } catch (e) { continue; }\n  if (!Array.isArray(arr)) arr = [arr];\n  for (const j of arr) {\n    if (!j || j['@type'] !== 'JobPosting' || !j.url) continue;\n    const url = String(j.url).split('?')[0].replace(/\\/+$/, '');\n    if (seen.has(url)) continue;\n    seen.add(url);\n    const desc = String(j.description || '').replace(/<[^>]+>/g, ' ').replace(/\\s+/g, ' ').trim().slice(0, 600);\n    const company = (j.hiringOrganization && j.hiringOrganization.name) ? String(j.hiringOrganization.name).trim() : '';\n    out.push({ json: { url, source: 'djinni', title: String(j.title || '').trim(), company, snippet: desc, salary: '', location: '', posted_at: String(j.datePosted || '').trim() } });\n  }\n}\nreturn out;"
+      },
+      "id": "a48eb53e-0e77-4e2f-ac32-f9a4568f6246",
+      "name": "Parse Djinni",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const STRONG = ['n8n','no-code','nocode','low-code','make.com','zapier','manychat','voiceflow','langchain','retell','vapi','rpa'];\nconst TITLE_HINTS = ['automation','integration','workflow','chatbot','ai engineer','ai developer','ai automation','prompt engineer','ai agent','no code','automation engineer','integration engineer'];\nconst TITLE_BLOCK = ['assistant','data entry','sales','sdr','closer','recruiter','designer','officer','manager','interdiction','content creator','executive','analyst','agilista','accountant','marketer','nurse','driver'];\nconst out = [];\nfor (const item of $input.all()) {\n  const title = String(item.json.title || '').toLowerCase();\n  const blob = (title + ' ' + String(item.json.snippet || '')).toLowerCase();\n  if (TITLE_BLOCK.some(b => title.includes(b))) continue;\n  const strong = STRONG.some(k => blob.includes(k));\n  const titleHit = TITLE_HINTS.some(k => title.includes(k));\n  if (strong || titleHit) out.push({ json: item.json });\n}\nreturn out;"
+      },
+      "id": "cacc93db-2a61-40f1-8fc6-a47bd154efea",
+      "name": "Keyword Pre-Filter",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "rowNotExists",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "ItoYPqjXsg6vKqpc",
+          "cachedResultName": "jobs"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "url",
+              "keyValue": "={{ $json.url }}"
+            }
+          ]
+        }
+      },
+      "id": "79d03dd0-3cce-4e1d-9f82-6f2793ceecba",
+      "name": "Filter New Jobs",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        896,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Вакансія:\nTitle: {{ $json.title }}\nCompany: {{ $json.company }}\nDescription: {{ $json.snippet }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "Ти оцінюєш релевантність вакансії під профіль кандидата. Профіль: No-Code Automation Developer. Стек: n8n, Make.com, ManyChat, AI-інтеграції (OpenAI, Claude), чат-боти, Supabase, API. Шукає remote/freelance. Поверни score 0-100 та коротку причину (до 10 слів українською). 100 = ідеально (n8n/automation/AI dev). 0 = нерелевантно (продажі, дизайн, не-IT). Якщо опис порожній — орієнтуйся на заголовок."
+        }
+      },
+      "id": "d7f71c0c-cfce-40ac-9a55-20dbf07dcf63",
+      "name": "Score Relevance",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        1120,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-4o-mini"
+        },
+        "builtInTools": {},
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "id": "c8d0c3d3-46f4-4874-bfd2-04c84dfaddd6",
+      "name": "GPT-4o-mini",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        1136,
+        336
+      ],
+      "credentials": {
+        "openAiApi": {
+          "name": "OpenAi_main"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{ \"score\": 87, \"reason\": \"n8n automation engineer role\" }"
+      },
+      "id": "109188ce-6309-43b7-b4f6-238e15ffb1bf",
+      "name": "Score Schema",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1264,
+        336
+      ]
+    },
+    {
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "ItoYPqjXsg6vKqpc",
+          "cachedResultName": "jobs"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "url",
+              "displayName": "url",
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "required": false,
+              "display": true
+            },
+            {
+              "id": "source",
+              "displayName": "source",
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "required": false,
+              "display": true
+            },
+            {
+              "id": "title",
+              "displayName": "title",
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "required": false,
+              "display": true
+            },
+            {
+              "id": "company",
+              "displayName": "company",
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "required": false,
+              "display": true
+            },
+            {
+              "id": "ai_score",
+              "displayName": "ai_score",
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "required": false,
+              "display": true
+            },
+            {
+              "id": "ai_reason",
+              "displayName": "ai_reason",
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "required": false,
+              "display": true
+            },
+            {
+              "id": "sent_at",
+              "displayName": "sent_at",
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "required": false,
+              "display": true
+            }
+          ],
+          "value": {
+            "url": "={{ $('Filter New Jobs').item.json.url }}",
+            "source": "={{ $('Filter New Jobs').item.json.source }}",
+            "title": "={{ $('Filter New Jobs').item.json.title }}",
+            "company": "={{ $('Filter New Jobs').item.json.company }}",
+            "ai_score": "={{ $json.output.score }}",
+            "ai_reason": "={{ $json.output.reason }}",
+            "sent_at": "={{ $now.toISO() }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "b7945c43-f857-4a60-a106-2f6fb439f127",
+      "name": "Save Job",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1472,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "459910467",
+        "text": "=🎯 {{ $json.output.score }}/100 — {{ $(\"Filter New Jobs\").item.json.title }}\n🏢 {{ $(\"Filter New Jobs\").item.json.company }}\n💬 {{ $json.output.reason }}\n🔗 {{ $(\"Filter New Jobs\").item.json.url }}\nДжерело: {{ $(\"Filter New Jobs\").item.json.source }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "disable_web_page_preview": true
+        }
+      },
+      "id": "44190286-a8a4-4a50-9fe7-b0647bfd4ca1",
+      "name": "Send to Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1696,
+        208
+      ],
+      "webhookId": "0108138c-acde-405a-b59c-4b5e6127b25c",
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram Burum_bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.output.score }}",
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              },
+              "rightValue": 65,
+              "id": "047cde79-1147-410d-ab77-7c498426d015"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "1b9a7be6-6f29-4fc5-9dfe-edaf0f03ce50",
+      "name": "Score >= 65",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        1472,
+        208
+      ]
+    }
+  ],
+  "connections": {
+    "Every 3 Hours": {
+      "main": [
+        [
+          {
+            "node": "Djinni Fetch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Djinni Fetch": {
+      "main": [
+        [
+          {
+            "node": "Parse Djinni",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Djinni": {
+      "main": [
+        [
+          {
+            "node": "Keyword Pre-Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keyword Pre-Filter": {
+      "main": [
+        [
+          {
+            "node": "Filter New Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter New Jobs": {
+      "main": [
+        [
+          {
+            "node": "Score Relevance",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score Relevance": {
+      "main": [
+        [
+          {
+            "node": "Save Job",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Score >= 65",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GPT-4o-mini": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Score Relevance",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score Schema": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Score Relevance",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score >= 65": {
+      "main": [
+        [
+          {
+            "node": "Send to Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true,
+    "timeSavedMode": "fixed",
+    "timezone": "Europe/Kyiv",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "fc0ad843-5394-4aab-b658-210ed35f6288",
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp"
+  },
+  "id": "8wXiFp0PESPxevUW",
+  "tags": []
+}
