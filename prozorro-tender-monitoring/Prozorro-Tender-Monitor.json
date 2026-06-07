@@ -1,0 +1,1419 @@
+{
+  "name": "Tenderts",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "const tenders = $('HTTP Request').item.json.data || [];\nreturn tenders.map(t => ({ json: t }));\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1136,
+        112
+      ],
+      "id": "6c079eda-78bd-49dc-a44a-8b54df5da003",
+      "name": "Split Tenders"
+    },
+    {
+      "parameters": {
+        "url": "=https://public.api.openprocurement.org/api/2.5/tenders/{{ $json.id }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -928,
+        112
+      ],
+      "id": "f0c75193-7b63-4528-a7a3-e7f2b7cc391f",
+      "name": "Get Tender Details",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const d = $json.data;\n\nconst CPV_CODES = ['31154000-0', '31434000-7', '31430000-9'];\nconst BRANDS = [\n  'anker', 'solix', 'zendure', 'bluetti', 'marstek', 'jackery',\n  'apstorage', 'apsystems', 'everhome', 'hoymiles', 'novgen',\n  'shelly', 'tuya', 'tentek', 'jolywood'\n];\nconst MIN_AMOUNT = 50000;\nconst ALLOWED_TYPES = ['belowThreshold', 'aboveThreshold', 'aboveThresholdEU', 'aboveThresholdUA', 'priceQuotation'];\n\nif (!ALLOWED_TYPES.includes(d.procurementMethodType)) return { json: { matched: false } };\nif ((d.value?.amount || 0) < MIN_AMOUNT) return { json: { matched: false } };\n\nlet matched = false;\nfor (const item of (d.items || [])) {\n  if (CPV_CODES.includes(item.classification?.id || '')) { matched = true; break; }\n}\nif (!matched) {\n  const text = ((d.title || '') + ' ' + (d.description || '')).toLowerCase();\n  if (BRANDS.some(b => text.includes(b))) matched = true;\n}\n\nif (!matched) return { json: { matched: false } };\n\nreturn {\n  json: {\n    matched: true,\n    data: {\n      tenderID: d.tenderID,\n      status: d.status,\n      procurementMethodType: d.procurementMethodType,\n      title: d.title,\n      value: d.value,\n      datePublished: d.datePublished,\n      enquiryPeriod: d.enquiryPeriod,\n      tenderPeriod: d.tenderPeriod,\n      auctionPeriod: d.auctionPeriod,\n      procuringEntity: d.procuringEntity,\n      items: d.items,\n      documents: d.documents,\n      bids: d.bids,\n      awards: d.awards\n    }\n  }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -688,
+        112
+      ],
+      "id": "da003d4f-3e12-48c4-b96e-8313c443a64a",
+      "name": "Filter Tenders"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "5b2c659d-7839-4fcf-8123-60cf153d7297",
+              "leftValue": "={{ $json.matched }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -2048,
+        544
+      ],
+      "id": "5fef0c3d-0d36-4b9f-ae07-6aa0c0fc0fa6",
+      "name": "Filter Tenders1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $json.data;\nconst toDate = (val) => { if (!val) return ''; return val.split('T')[0] || ''; };\n\nconst entity = d.procuringEntity || {};\nconst contact = entity.contactPoint || {};\nconst entityAddress = entity.address || {};\nconst item = (d.items || [])[0] || {};\nconst deliveryAddress = item.deliveryAddress || {};\nconst city = entityAddress.locality || entityAddress.streetAddress || deliveryAddress.locality || '—';\nconst region = entityAddress.region || deliveryAddress.region || '—';\nconst documents = (d.documents || [])\n  .filter(doc => doc.confidentiality === 'public')\n  .map(doc => ({ title: doc.title || doc.documentType || '—', url: doc.url || '—' }));\n\nconst awardsMap = {};\nfor (const award of (d.awards || [])) {\n  if (award.bid_id) awardsMap[award.bid_id] = award.value?.amount;\n}\nconst participants = (d.bids || []).map(bid => {\n  const tenderer = (bid.tenderers || [])[0] || {};\n  const cp = tenderer.contactPoint || {};\n  return {\n    name: tenderer.name || '—',\n    edrpou: tenderer.identifier?.id || '—',\n    email: cp.email || '—',\n    phone: cp.telephone || '—',\n    initialBid: bid.value?.amount || 0,\n    finalBid: awardsMap[bid.id] || bid.value?.amount || 0,\n    date: bid.date ? bid.date.split('T')[0] : '—'\n  };\n});\n\nif (d.status !== 'active.tendering') {\n  return { json: {\n    _skip: true,\n    tenderID: d.tenderID,\n    orgName: entity.name || '—',\n    edrpou: entity.identifier?.id || '—',\n    city, region,\n    contactName: contact.name || '—',\n    email: contact.email || '—',\n    phone: contact.telephone || '—',\n    title: d.title || '—',\n    amount: d.value?.amount || 0,\n    cpv: item.classification?.id || '—',\n    url: `https://prozorro.gov.ua/tender/${d.tenderID}`,\n    participants: JSON.stringify(participants),\n    documents: JSON.stringify(documents)\n  }};\n}\n\nreturn { json: {\n  _skip: false,\n  tenderID: d.tenderID, orgName: entity.name || '—', edrpou: entity.identifier?.id || '—',\n  city, region, contactName: contact.name || '—', email: contact.email || '—',\n  phone: contact.telephone || '—', title: d.title || '—', amount: d.value?.amount || 0,\n  cpv: item.classification?.id || '—', url: `https://prozorro.gov.ua/tender/${d.tenderID}`,\n  datePublished: toDate(d.datePublished), enquiryEnd: toDate(d.enquiryPeriod?.endDate),\n  tenderEnd: toDate(d.tenderPeriod?.endDate), auctionStart: toDate(d.auctionPeriod?.startDate),\n  documents: JSON.stringify(documents)\n}};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1840,
+        528
+      ],
+      "id": "0dab096d-aaba-4fff-93a9-7d335aaf2012",
+      "name": "Format Tender"
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "appjLn9kbBzEhbIbA",
+          "mode": "list",
+          "cachedResultName": "Prozzoro Base",
+          "cachedResultUrl": "https://airtable.com/appjLn9kbBzEhbIbA"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblzyHO8lKKJgRFQB",
+          "mode": "list",
+          "cachedResultName": "Активні тендери",
+          "cachedResultUrl": "https://airtable.com/appjLn9kbBzEhbIbA/tblzyHO8lKKJgRFQB"
+        },
+        "filterByFormula": "={tenderID} = \"{{ $json.tenderID }}\"",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.2,
+      "position": [
+        -1440,
+        416
+      ],
+      "id": "c51155a0-1ae9-48c2-b3e6-f81fc835e08e",
+      "name": "Search records1",
+      "alwaysOutputData": true,
+      "credentials": {
+        "airtableTokenApi": {
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "147ff8cb-b5a5-45fc-b20c-7428d066ad9c",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "empty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -1216,
+        416
+      ],
+      "id": "f19a896b-79e7-4916-a44a-4df9577d3798",
+      "name": "If2"
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "value": "appjLn9kbBzEhbIbA",
+          "mode": "list",
+          "cachedResultName": "Prozzoro Base",
+          "cachedResultUrl": "https://airtable.com/appjLn9kbBzEhbIbA"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblzyHO8lKKJgRFQB",
+          "mode": "list",
+          "cachedResultName": "Активні тендери",
+          "cachedResultUrl": "https://airtable.com/appjLn9kbBzEhbIbA/tblzyHO8lKKJgRFQB"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "tenderID": "={{ $('Format Tender').item.json.tenderID }}",
+            "orgName": "={{ $('Format Tender').item.json.orgName }}",
+            "edrpou": "={{ $('Format Tender').item.json.edrpou }}",
+            "city": "={{ $('Format Tender').item.json.city }}",
+            "region": "={{ $('Format Tender').item.json.region }}",
+            "contactName": "={{ $('Format Tender').item.json.contactName }}",
+            "email": "={{ $('Format Tender').item.json.email }}",
+            "phone": "={{ $('Format Tender').item.json.phone }}",
+            "title": "={{ $('Format Tender').item.json.title }}",
+            "amount": "={{ $('Format Tender').item.json.amount }}",
+            "cpv": "={{ $('Format Tender').item.json.cpv }}",
+            "documents": "={{ $('Format Tender').item.json.documents }}",
+            "url": "={{ $('Format Tender').item.json.url }}",
+            "datePublished": "={{ $('Format Tender').item.json.datePublished }}",
+            "enquiryEnd": "={{ $('Format Tender').item.json.enquiryEnd }}",
+            "tenderEnd": "={{ $('Format Tender').item.json.tenderEnd }}",
+            "auctionStart": "={{ $('Format Tender').item.json.auctionStart }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "tenderID",
+              "displayName": "tenderID",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "orgName",
+              "displayName": "orgName",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "edrpou",
+              "displayName": "edrpou",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "url",
+              "displayName": "url",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "amount",
+              "displayName": "amount",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "city",
+              "displayName": "city",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "region",
+              "displayName": "region",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "contactName",
+              "displayName": "contactName",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "title",
+              "displayName": "title",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "cpv",
+              "displayName": "cpv",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "datePublished",
+              "displayName": "datePublished",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "enquiryEnd",
+              "displayName": "enquiryEnd",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "tenderEnd",
+              "displayName": "tenderEnd",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "auctionStart",
+              "displayName": "auctionStart",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "documents",
+              "displayName": "documents",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.2,
+      "position": [
+        -992,
+        400
+      ],
+      "id": "d71d1cec-9182-475f-ae5f-91f0c9392c0e",
+      "name": "Create a record2",
+      "credentials": {
+        "airtableTokenApi": {
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -2576,
+        224
+      ],
+      "id": "712d5279-daa8-4a20-83e0-22d80c11ae33",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "=0 9,12,15,18 * * *"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -2624,
+        32
+      ],
+      "id": "1c0255cc-e35d-4be6-bdf7-f91b033f88e3",
+      "name": "Schedule Trigger",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "078c5612-899c-4450-981d-5c56ea16abe9",
+              "leftValue": "={{ $json._skip }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -1856,
+        768
+      ],
+      "id": "2fc9ff65-8e43-47d3-99d5-43262ae79ebe",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "appjLn9kbBzEhbIbA",
+          "mode": "list",
+          "cachedResultName": "Prozzoro Base",
+          "cachedResultUrl": "https://airtable.com/appjLn9kbBzEhbIbA"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblK5hdPzDTwVdakP",
+          "mode": "list",
+          "cachedResultName": "Ліди",
+          "cachedResultUrl": "https://airtable.com/appjLn9kbBzEhbIbA/tblK5hdPzDTwVdakP"
+        },
+        "filterByFormula": "={tenderID} = \"{{ $json.tenderID }}\"",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.2,
+      "position": [
+        -1552,
+        864
+      ],
+      "id": "b72c4508-8356-4c59-aaf1-e7d9b3cfaf6c",
+      "name": "Search records",
+      "alwaysOutputData": true,
+      "credentials": {
+        "airtableTokenApi": {
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "147ff8cb-b5a5-45fc-b20c-7428d066ad9c",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "empty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -1328,
+        864
+      ],
+      "id": "0bdf7bf5-a70b-4f6f-b44a-78b9abb9332c",
+      "name": "If3"
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "value": "appjLn9kbBzEhbIbA",
+          "mode": "list",
+          "cachedResultName": "Prozzoro Base",
+          "cachedResultUrl": "https://airtable.com/appjLn9kbBzEhbIbA"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblK5hdPzDTwVdakP",
+          "mode": "list",
+          "cachedResultName": "Ліди",
+          "cachedResultUrl": "https://airtable.com/appjLn9kbBzEhbIbA/tblK5hdPzDTwVdakP"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "tenderID": "={{ $('Format Tender').item.json.tenderID }}",
+            "orgName": "={{ $('Format Tender').item.json.orgName }}",
+            "edrpou": "={{ $('Format Tender').item.json.edrpou }}",
+            "city": "={{ $('Format Tender').item.json.city }}",
+            "region": "={{ $('Format Tender').item.json.region }}",
+            "contactName": "={{ $('Format Tender').item.json.contactName }}",
+            "email": "={{ $('Format Tender').item.json.email }}",
+            "phone": "={{ $('Format Tender').item.json.phone }}",
+            "title": "={{ $('Format Tender').item.json.title }}",
+            "amount": "={{ $('Format Tender').item.json.amount }}",
+            "cpv": "={{ $('Format Tender').item.json.cpv }}",
+            "documents": "={{ $('Format Tender').item.json.documents }}",
+            "url": "={{ $('Format Tender').item.json.url }}",
+            "participants": "={{ $('Format Tender').item.json.participants }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "tenderID",
+              "displayName": "tenderID",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "orgName",
+              "displayName": "orgName",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "edrpou",
+              "displayName": "edrpou",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "city",
+              "displayName": "city",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "region",
+              "displayName": "region",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "contactName",
+              "displayName": "contactName",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "title",
+              "displayName": "title",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "amount",
+              "displayName": "amount",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "cpv",
+              "displayName": "cpv",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "supplierEdrpou",
+              "displayName": "supplierEdrpou",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "documents",
+              "displayName": "documents",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "url",
+              "displayName": "url",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "contractID",
+              "displayName": "contractID",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "dateSigned",
+              "displayName": "dateSigned",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "supplierName",
+              "displayName": "supplierName",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "participants",
+              "displayName": "participants",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.2,
+      "position": [
+        -960,
+        848
+      ],
+      "id": "060f3877-2340-4895-9c9c-ac83ce74642e",
+      "name": "Create a record",
+      "credentials": {
+        "airtableTokenApi": {
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://public.api.openprocurement.org/api/2.5/tenders",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "status",
+              "value": "active.tendering"
+            },
+            {
+              "name": "offset",
+              "value": "={{ $json.offset }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1760,
+        128
+      ],
+      "id": "23712974-7560-4b81-b267-c4fdc01a53de",
+      "name": "HTTP Request",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "return { json: { offset: $json.value } };\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2016,
+        128
+      ],
+      "id": "fd38212e-a56a-492b-9c4f-4cbffe3d0190",
+      "name": "Get Offset Tenders1"
+    },
+    {
+      "parameters": {
+        "content": "Cron 0 9,12,15,18 * * * — запускає 4 рази на день (9:00, 12:00, 15:00, 18:00 Київ)\n",
+        "width": 208,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -2832,
+        -368
+      ],
+      "typeVersion": 1,
+      "id": "27774a97-cba9-428a-aae2-bae6d0e4fb65",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "Розкладає масив tenders з HTTP Request на окремі items для подальшої обробки\n",
+        "width": 208,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1200,
+        -112
+      ],
+      "typeVersion": 1,
+      "id": "05e93a4a-9797-4b0d-af02-a226b31f1134",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "Перетворює { value } з Data Table на { offset } для HTTP Request\n",
+        "width": 208,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -2048,
+        -64
+      ],
+      "typeVersion": 1,
+      "id": "32b5411d-ad5b-4265-91b9-c5156777deaa",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "content": "GET /api/2.5/tenders?status=active.tendering&offset=... — список активних тендерів\n",
+        "width": 208,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1808,
+        -64
+      ],
+      "typeVersion": 1,
+      "id": "a9bdc88b-b63c-404c-8ac2-dc9c11a3dd3c",
+      "name": "Sticky Note3"
+    },
+    {
+      "parameters": {
+        "content": "GET /api/2.5/tenders/{id} — повні дані тендера (з retry 5s на помилку)\n",
+        "width": 208,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -976,
+        -112
+      ],
+      "typeVersion": 1,
+      "id": "05146799-48ee-4f82-93ff-abe67a396b7e",
+      "name": "Sticky Note4"
+    },
+    {
+      "parameters": {
+        "content": "Перевіряє: тип тендера (allowed types) + сума ≥ 50 000 + CPV match або бренд в title/description; ставить matched: true/false\n",
+        "width": 208,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -736,
+        -112
+      ],
+      "typeVersion": 1,
+      "id": "e78c6c7f-8a97-489f-b8b9-7128da3171f7",
+      "name": "Sticky Note5"
+    },
+    {
+      "parameters": {
+        "content": "matched is true → True далі, False — drop\n",
+        "width": 208,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -2112,
+        368
+      ],
+      "typeVersion": 1,
+      "id": "5f566ba5-3694-4190-9b4b-8445c360d8d1",
+      "name": "Sticky Note6"
+    },
+    {
+      "parameters": {
+        "content": "Будує об'єкт даних. Якщо status ≠ active.tendering → _skip: true + поля для Ліди (з participants). Інакше → _skip: false + повні поля для Активних тендерів\n",
+        "width": 208,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1872,
+        368
+      ],
+      "typeVersion": 1,
+      "id": "3808e807-9c16-4c1c-8496-3dc4bfbf2638",
+      "name": "Sticky Note7"
+    },
+    {
+      "parameters": {
+        "content": "_skip is false → True (Активні тендери) / False (Ліди — закриті тендери)\n",
+        "width": 208,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1952,
+        944
+      ],
+      "typeVersion": 1,
+      "id": "65b44c3d-5d6a-4874-b789-60b8db07dde8",
+      "name": "Sticky Note8"
+    },
+    {
+      "parameters": {
+        "content": "Шукає в \"Ліди\" по tenderID (дедуплікація закритих тендерів)\n",
+        "width": 208,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1616,
+        1072
+      ],
+      "typeVersion": 1,
+      "id": "c4e4821e-7cb7-407b-835e-af001931f263",
+      "name": "Sticky Note9"
+    },
+    {
+      "parameters": {
+        "content": "id is empty → True → Create\n",
+        "width": 208,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1360,
+        1072
+      ],
+      "typeVersion": 1,
+      "id": "cc8f628a-af4b-4e2b-b618-450760476c27",
+      "name": "Sticky Note10"
+    },
+    {
+      "parameters": {
+        "content": "Створює запис в \"Ліди\" (14 полів для закритих тендерів: tenderID, orgName, edrpou, city, region, contactName, email, phone, title, amount, cpv, url, documents, participants)\n",
+        "height": 176,
+        "width": 208,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -992,
+        1072
+      ],
+      "typeVersion": 1,
+      "id": "236b8954-ef91-40e3-9170-0a13ae26a768",
+      "name": "Sticky Note11"
+    },
+    {
+      "parameters": {
+        "content": "Шукає в \"Активні тендери\" по tenderID (дедуплікація)\n",
+        "width": 208,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1488,
+        592
+      ],
+      "typeVersion": 1,
+      "id": "b88a3534-4c62-46e7-85dd-e32a71efe81d",
+      "name": "Sticky Note12"
+    },
+    {
+      "parameters": {
+        "content": "id is empty (не знайдено) → True → Create\n",
+        "width": 208,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1248,
+        592
+      ],
+      "typeVersion": 1,
+      "id": "bd3acbca-b5d7-4c8a-9894-75437db87b3c",
+      "name": "Sticky Note13"
+    },
+    {
+      "parameters": {
+        "content": "Створює запис в \"Активні тендери\" (17 полів: tenderID, orgName, edrpou, city, region, contactName, email, phone, title, amount, cpv, url, datePublished, enquiryEnd, tenderEnd, auctionStart, documents)\n",
+        "height": 192,
+        "width": 208,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1008,
+        592
+      ],
+      "typeVersion": 1,
+      "id": "48511709-7ce9-467e-ad0a-1642db2ab03e",
+      "name": "Sticky Note14"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -2688,
+        -96
+      ],
+      "id": "e2e25b01-92fe-4b2c-b629-3ef976f914e9",
+      "name": "Schedule Trigger1"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "ghH6Nc6v0eQimnbB",
+          "mode": "list",
+          "cachedResultName": "prozorro_config",
+          "cachedResultUrl": "/projects/aG9gmQVmSbyDykHd/datatables/ghH6Nc6v0eQimnbB"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "key",
+              "keyValue": "=tenders_offset"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -2256,
+        128
+      ],
+      "id": "f938bd3c-5340-4d86-afb4-84a2f1b8bc6a",
+      "name": "Get row(s)"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "value": "ghH6Nc6v0eQimnbB",
+          "mode": "list",
+          "cachedResultName": "prozorro_config",
+          "cachedResultUrl": "/projects/aG9gmQVmSbyDykHd/datatables/ghH6Nc6v0eQimnbB"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "key",
+              "keyValue": "=tenders_offset"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "value": "={{ $json.next_page.offset }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "key",
+              "displayName": "key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "value",
+              "displayName": "value",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -1488,
+        112
+      ],
+      "id": "e1d8245e-45dd-4c07-a203-8fcd606bea39",
+      "name": "Update row(s)"
+    },
+    {
+      "parameters": {
+        "content": "Читає поточний tenders_offset з Data Table \"prozorro_config\"\n",
+        "width": 208,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -2304,
+        -64
+      ],
+      "typeVersion": 1,
+      "id": "95fb3f2f-98a1-4894-956c-6637e4bae830",
+      "name": "Sticky Note15"
+    },
+    {
+      "parameters": {
+        "content": "Зберігає новий next_page.offset у Data Table \"prozorro_config\"\nЗберігає прогрес між запусками (переживає рестарт Railway)\n",
+        "width": 208,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1536,
+        -80
+      ],
+      "typeVersion": 1,
+      "id": "d1384148-5ec3-49c0-99b8-f31d5a6fbe0e",
+      "name": "Sticky Note16"
+    }
+  ],
+  "connections": {
+    "Split Tenders": {
+      "main": [
+        [
+          {
+            "node": "Get Tender Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Tender Details": {
+      "main": [
+        [
+          {
+            "node": "Filter Tenders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Tenders": {
+      "main": [
+        [
+          {
+            "node": "Filter Tenders1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Tenders1": {
+      "main": [
+        [
+          {
+            "node": "Format Tender",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Tender": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search records1": {
+      "main": [
+        [
+          {
+            "node": "If2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If2": {
+      "main": [
+        [
+          {
+            "node": "Create a record2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get row(s)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Get row(s)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Search records1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Search records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search records": {
+      "main": [
+        [
+          {
+            "node": "If3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If3": {
+      "main": [
+        [
+          {
+            "node": "Create a record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Offset Tenders1": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Update row(s)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger1": {
+      "main": [
+        [
+          {
+            "node": "Get row(s)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get row(s)": {
+      "main": [
+        [
+          {
+            "node": "Get Offset Tenders1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update row(s)": {
+      "main": [
+        [
+          {
+            "node": "Split Tenders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "timezone": "Europe/Kyiv",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "saveExecutionProgress": true
+  },
+  "versionId": "1d519034-a2a1-47d7-a4fd-07e721f5a912",
+  "meta": {},
+  "id": "V1XlJTY3hqvRg5Ou",
+  "tags": []
+}
