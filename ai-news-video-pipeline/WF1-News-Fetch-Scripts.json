@@ -272,7 +272,7 @@
     },
     {
       "parameters": {
-        "chatId": "459910467",
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
         "text": "={{ \"Нові скрипти готові до редагування!\\n\\nДата: \" + $now.toFormat(\"dd.MM.yyyy\") + \"\\nКількість: 5 Shorts + 1 відео 16:9\\n\\nПерейди в Notion, відредагуй і постав Status = Approved\" }}",
         "additionalFields": {
           "appendAttribution": false
