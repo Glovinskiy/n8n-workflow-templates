@@ -1,0 +1,715 @@
+{
+  "name": "JH · Stable (RSS/API)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 3
+            }
+          ]
+        }
+      },
+      "id": "ec23758a-2bf1-41ce-bd19-1295b1198f90",
+      "name": "Every 3 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://jobs.dou.ua/vacancies/feeds/",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "15f35e4c-b745-48a4-927b-5105ff97b8ab",
+      "name": "DOU Fetch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        224,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "options": {
+          "explicitArray": false,
+          "mergeAttrs": true
+        }
+      },
+      "id": "37065cc2-1a8b-42f8-8657-2601adc3a0f8",
+      "name": "DOU XML to JSON",
+      "type": "n8n-nodes-base.xml",
+      "typeVersion": 1,
+      "position": [
+        448,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "rss.channel.item",
+        "options": {}
+      },
+      "id": "fcf7fe5b-e8ab-4b52-8479-e1f5e5e8b009",
+      "name": "DOU Split Items",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        672,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const cleanUrl = (u) => String(u || '').trim().split('?')[0].replace(/\\/+$/, '');\nconst out = [];\nfor (const item of $input.all()) {\n  const d = item.json;\n  let link = d.link;\n  if (link && typeof link === 'object') link = link._ || link.href || '';\n  const url = cleanUrl(link);\n  if (!url) continue;\n  const desc = String(d.description || '').replace(/<[^>]+>/g, ' ').replace(/\\s+/g, ' ').trim().slice(0, 600);\n  out.push({ json: {\n    url, source: 'dou',\n    title: String(d.title || '').trim(),\n    company: '',\n    snippet: desc, salary: '', location: '',\n    posted_at: String(d.pubDate || '').trim(),\n  }});\n}\nreturn out;\n"
+      },
+      "id": "0f67e911-0d1c-423a-9ea3-4288650c25c7",
+      "name": "Normalize DOU",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "numberInputs": 3
+      },
+      "id": "59150abe-e0f5-4726-9a2b-848c670d78ae",
+      "name": "All Jobs",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1120,
+        176
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://remoteok.com/api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (compatible; JobHunter/1.0)"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "08b92b41-2bdd-4393-bf34-d4bbf75e2759",
+      "name": "Remote OK Fetch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        672,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const cleanUrl = (u) => String(u || '').trim().split('?')[0].replace(/\\/+$/, '');\nconst out = [];\nfor (const item of $input.all()) {\n  const d = item.json;\n  if (d.legal != null || !d.position) continue;\n  const desc = String(d.description || '').replace(/<[^>]+>/g, ' ').replace(/\\s+/g, ' ').trim().slice(0, 600);\n  let sal = '';\n  if (d.salary_min) sal = '$' + d.salary_min + '-' + (d.salary_max || '');\n  out.push({ json: {\n    url: cleanUrl(d.url), source: 'remoteok',\n    title: String(d.position || '').trim(),\n    company: String(d.company || '').trim(),\n    snippet: desc, salary: sal,\n    location: String(d.location || 'Remote').trim(),\n    posted_at: String(d.date || '').trim(),\n  }});\n}\nreturn out;\n"
+      },
+      "id": "e62d746e-b6ac-47b9-98d9-a6140998a05a",
+      "name": "Normalize Remote OK",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://weworkremotely.com/categories/remote-programming-jobs.rss",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "119cb7e2-36da-43d1-9792-720be0f61c45",
+      "name": "WWR Fetch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        224,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "options": {
+          "explicitArray": false,
+          "mergeAttrs": true
+        }
+      },
+      "id": "b652fdd9-2278-4afd-9ae2-f49c4565d963",
+      "name": "WWR XML to JSON",
+      "type": "n8n-nodes-base.xml",
+      "typeVersion": 1,
+      "position": [
+        448,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "rss.channel.item",
+        "options": {}
+      },
+      "id": "04ba13ed-3306-4a6b-a733-e2c2a94999f8",
+      "name": "WWR Split Items",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        672,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const cleanUrl = (u) => String(u || '').trim().split('?')[0].replace(/\\/+$/, '');\nconst out = [];\nfor (const item of $input.all()) {\n  const d = item.json;\n  let link = d.link;\n  if (link && typeof link === 'object') link = link._ || link.href || '';\n  const url = cleanUrl(link);\n  if (!url) continue;\n  const titleRaw = String(d.title || '').trim();\n  let company = '', title = titleRaw;\n  const idx = titleRaw.indexOf(':');\n  if (idx > -1) { company = titleRaw.slice(0, idx).trim(); title = titleRaw.slice(idx + 1).trim(); }\n  const desc = String(d.description || d.content || '').replace(/<[^>]+>/g, ' ').replace(/\\s+/g, ' ').trim().slice(0, 600);\n  out.push({ json: {\n    url, source: 'wwr', title, company,\n    snippet: desc, salary: '', location: 'Remote',\n    posted_at: String(d.pubDate || '').trim(),\n  }});\n}\nreturn out;\n"
+      },
+      "id": "c3a49c17-a132-4e4a-ba69-60baf625fba9",
+      "name": "Normalize WWR",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Keyword Pre-Filter ───────────────────────────────────────────\n// STRONG     — однозначні маркери, ловимо будь-де (title або опис)\n// TITLE_HINTS — слабкі маркери, тільки в заголовку (бо в описах бузворди скрізь)\n// TITLE_BLOCK — ролі-сміття, ріжемо одразу\n\nconst STRONG = [\n  'n8n', 'no-code', 'nocode', 'low-code', 'make.com', 'zapier',\n  'manychat', 'voiceflow', 'langchain', 'retell', 'vapi', 'rpa'\n];\n\nconst TITLE_HINTS = [\n  'automation', 'integration', 'workflow', 'chatbot',\n  'ai engineer', 'ai developer', 'ai automation', 'prompt engineer',\n  'ai agent', 'no code', 'automation engineer', 'integration engineer'\n];\n\nconst TITLE_BLOCK = [\n  'assistant', 'data entry', 'sales', 'sdr', 'closer', 'recruiter',\n  'designer', 'officer', 'manager', 'interdiction', 'content creator',\n  'executive', 'analyst', 'agilista', 'accountant', 'marketer',\n  'nurse', 'driver'\n];\n\nconst out = [];\nfor (const item of $input.all()) {\n  const title = String(item.json.title || '').toLowerCase();\n  const blob = (title + ' ' + String(item.json.snippet || '')).toLowerCase();\n\n  if (TITLE_BLOCK.some(b => title.includes(b))) continue;\n\n  const strong = STRONG.some(k => blob.includes(k));\n  const titleHit = TITLE_HINTS.some(k => title.includes(k));\n\n  if (strong || titleHit) out.push({ json: item.json });\n}\n\nreturn out;\n"
+      },
+      "id": "244b3795-918c-4cc7-8131-d8579f9a8702",
+      "name": "Keyword Pre-Filter",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "rowNotExists",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "ItoYPqjXsg6vKqpc",
+          "cachedResultName": "jobs"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "url",
+              "keyValue": "={{ $json.url }}"
+            }
+          ]
+        }
+      },
+      "id": "af6ce06e-e2b5-4b32-bce7-cdb966dc9192",
+      "name": "Filter New Jobs",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1568,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Вакансія:\nTitle: {{ $json.title }}\nCompany: {{ $json.company }}\nDescription: {{ $json.snippet }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "Ти оцінюєш релевантність вакансії під профіль кандидата. Профіль: No-Code Automation Developer. Стек: n8n, Make.com, ManyChat, AI-інтеграції (OpenAI, Claude), чат-боти, Supabase, API. Шукає remote/freelance. Поверни score 0-100 та коротку причину (до 10 слів українською). 100 = ідеально (n8n/automation/AI dev). 0 = нерелевантно (продажі, дизайн, не-IT)."
+        }
+      },
+      "id": "2b3f94ab-2760-48e8-82d4-461b3702793f",
+      "name": "Score Relevance",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        1792,
+        192
+      ],
+      "retryOnFail": true,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-4o-mini"
+        },
+        "builtInTools": {},
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "id": "d5c500f4-c760-4cc1-8b55-2a9f49e1ee91",
+      "name": "GPT-4o-mini",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        1808,
+        416
+      ],
+      "credentials": {
+        "openAiApi": {
+          "name": "OpenAi_main"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{ \"score\": 87, \"reason\": \"n8n automation engineer role\" }"
+      },
+      "id": "c2731b73-032c-45ec-8a25-f0ec8b73ca30",
+      "name": "Score Schema",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1936,
+        416
+      ]
+    },
+    {
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "ItoYPqjXsg6vKqpc",
+          "cachedResultName": "jobs"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "url": "={{ $('Filter New Jobs').item.json.url }}",
+            "source": "={{ $('Filter New Jobs').item.json.source }}",
+            "title": "={{ $('Filter New Jobs').item.json.title }}",
+            "company": "={{ $('Filter New Jobs').item.json.company }}",
+            "ai_score": "={{ $json.output.score }}",
+            "ai_reason": "={{ $json.output.reason }}",
+            "sent_at": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "url",
+              "displayName": "url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false
+            },
+            {
+              "id": "source",
+              "displayName": "source",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false
+            },
+            {
+              "id": "title",
+              "displayName": "title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false
+            },
+            {
+              "id": "company",
+              "displayName": "company",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false
+            },
+            {
+              "id": "ai_score",
+              "displayName": "ai_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false
+            },
+            {
+              "id": "ai_reason",
+              "displayName": "ai_reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false
+            },
+            {
+              "id": "sent_at",
+              "displayName": "sent_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "f47959b7-d11a-42f7-bd8c-c467462830e3",
+      "name": "Save Job",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2144,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.output.score }}",
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              },
+              "rightValue": 65,
+              "id": "e8f8dd7e-6931-4714-9a4d-afd617c324cf"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "1d90897c-240c-487f-9a2e-5586c0c209c4",
+      "name": "Score >= 60",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        2144,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "459910467",
+        "text": "=🎯 {{ $json.output.score }}/100 — {{ $(\"Filter New Jobs\").item.json.title }}\n🏢 {{ $(\"Filter New Jobs\").item.json.company }}\n💬 {{ $json.output.reason }}\n🔗 {{ $(\"Filter New Jobs\").item.json.url }}\nДжерело: {{ $(\"Filter New Jobs\").item.json.source }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "disable_web_page_preview": true
+        }
+      },
+      "id": "9e73c61f-47a9-4465-9f1b-a88add59f4e4",
+      "name": "Send to Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2368,
+        288
+      ],
+      "webhookId": "0efbb68b-64dd-441a-91c4-dc7fe3946575",
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram Burum_bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 3 Hours": {
+      "main": [
+        [
+          {
+            "node": "DOU Fetch",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Remote OK Fetch",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "WWR Fetch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DOU Fetch": {
+      "main": [
+        [
+          {
+            "node": "DOU XML to JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DOU XML to JSON": {
+      "main": [
+        [
+          {
+            "node": "DOU Split Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DOU Split Items": {
+      "main": [
+        [
+          {
+            "node": "Normalize DOU",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize DOU": {
+      "main": [
+        [
+          {
+            "node": "All Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "All Jobs": {
+      "main": [
+        [
+          {
+            "node": "Keyword Pre-Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remote OK Fetch": {
+      "main": [
+        [
+          {
+            "node": "Normalize Remote OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Remote OK": {
+      "main": [
+        [
+          {
+            "node": "All Jobs",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "WWR Fetch": {
+      "main": [
+        [
+          {
+            "node": "WWR XML to JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WWR XML to JSON": {
+      "main": [
+        [
+          {
+            "node": "WWR Split Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WWR Split Items": {
+      "main": [
+        [
+          {
+            "node": "Normalize WWR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize WWR": {
+      "main": [
+        [
+          {
+            "node": "All Jobs",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Keyword Pre-Filter": {
+      "main": [
+        [
+          {
+            "node": "Filter New Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter New Jobs": {
+      "main": [
+        [
+          {
+            "node": "Score Relevance",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score Relevance": {
+      "main": [
+        [
+          {
+            "node": "Save Job",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Score >= 60",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GPT-4o-mini": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Score Relevance",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score Schema": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Score Relevance",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score >= 60": {
+      "main": [
+        [
+          {
+            "node": "Send to Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true,
+    "timeSavedMode": "fixed",
+    "timezone": "Europe/Kyiv",
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionTimeout": -1
+  },
+  "versionId": "56f39a3c-2f86-4d78-8e20-301817495613",
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp"
+  },
+  "id": "MXwHySwFENVsZWTS",
+  "tags": []
+}
